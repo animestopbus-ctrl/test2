@@ -1,9 +1,3 @@
-"""Database Queries for LastPerson07Bot
-
-This module contains all CRUD operations and specialized queries
-for interacting with MongoDB collections.
-"""
-
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
@@ -288,3 +282,4 @@ class LastPerson07Queries:
 
 # Global queries instance
 lastperson07_queries = LastPerson07Queries()
+
