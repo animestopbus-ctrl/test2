@@ -5,6 +5,7 @@ This module handles job scheduling for automated wallpaper posting.
 
 import logging
 import asyncio
+from typing import Optional  # Added missing import
 from datetime import datetime, timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -16,6 +17,8 @@ from db.queries import lastperson07_queries
 from utils.fetcher import lastperson07_wallpaper_fetcher
 from utils.promoter import lastperson07_add_promo_button_if_free
 from utils.metadata import lastperson07_format_wallpaper_caption
+
+# Import the correct function
 from utils.reactions import lastperson07_add_random_reaction
 
 # Setup logging
