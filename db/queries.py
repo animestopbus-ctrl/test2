@@ -1,227 +1,333 @@
-"""MongoDB Client Wrapper for LastPerson07Bot
+"""Database Queries for LastPerson07Bot
 
-This module provides a robust MongoDB connection with error handling,
-reconnection logic, and helper methods for database operations.
+This module contains all CRUD operations and specialized queries
+for interacting with MongoDB collections.
 """
 
 import logging
-import asyncio
-from typing import Optional, Dict, Any
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone
-from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase
-from pymongo.errors import ConnectionFailure, ServerSelectionTimeoutError
-from config.config import LASTPERSON07_MONGODB_URI, LASTPERSON07_DB_NAME
+from config.config import LASTPERSON07_FREE_FETCH_LIMIT
+from db.client import lastperson07_db_client
+from db.models import (
+    LastPerson07User, LastPerson07Schedule, LastPerson07ApiUrl,
+    LastPerson07BotSettings, UserTier, ScheduleInterval
+)
 
 # Setup logging
 logger = logging.getLogger(__name__)
 
-class LastPerson07DatabaseClient:
-    """MongoDB client wrapper with connection management."""
+class LastPerson07Queries:
+    """Database query operations wrapper."""
     
     def __init__(self):
-        """Initialize database client."""
-        self.uri = LASTPERSON07_MONGODB_URI
-        self.db_name = LASTPERSON07_DB_NAME
-        self.client: Optional[AsyncIOMotorClient] = None
-        self.database: Optional[AsyncIOMotorDatabase] = None
-        self.is_connected = False
-        self._connection_lock = asyncio.Lock()
-        
-    async def connect(self) -> bool:
-        """Establish connection to MongoDB."""
-        async with self._connection_lock:
-            if self.is_connected and self.client:
-                return True
-                
-            try:
-                self.client = AsyncIOMotorClient(
-                    self.uri,
-                    serverSelectionTimeoutMS=5000,
-                    connectTimeoutMS=5000,
-                    socketTimeoutMS=5000
+        """Initialize queries wrapper with database client."""
+        self.db = lastperson07_db_client
+    
+    async def get_user(self, user_id: int) -> Optional[LastPerson07User]:
+        """Get user by Telegram ID."""
+        try:
+            user_data = await self.db.find_one("users", {"_id": user_id})
+            if user_data:
+                return LastPerson07User.from_dict(user_data)
+            return None
+        except Exception as e:
+            logger.error(f"Error getting user {user_id}: {str(e)}")
+            return None
+    
+    async def create_user(self, user_id: int, username: str, 
+                         first_name: str) -> bool:
+        """Create a new user in database."""
+        try:
+            now = datetime.now(timezone.utc)
+            user = LastPerson07User(
+                _id=user_id,
+                username=username,
+                first_name=first_name,
+                join_date=now
+            )
+            
+            result = await self.db.insert_one("users", user.to_dict())
+            return result is not None
+        except Exception as e:
+            logger.error(f"Error creating user {user_id}: {str(e)}")
+            return False
+    
+    async def update_user_fetch_count(self, user_id: int) -> bool:
+        """Increment user's fetch count and update last fetch date."""
+        try:
+            now = datetime.now(timezone.utc)
+            update = {
+                "$inc": {"fetch_count": 1},
+                "$set": {"last_fetch_date": now}
+            }
+            
+            result = await self.db.update_one("users", {"_id": user_id}, update)
+            return result
+        except Exception as e:
+            logger.error(f"Error updating fetch count for user {user_id}: {str(e)}")
+            return False
+    
+    async def check_daily_limit(self, user_id: int) -> tuple[bool, int]:
+        """Check if user has reached daily fetch limit."""
+        try:
+            user = await self.get_user(user_id)
+            if not user:
+                return False, LASTPERSON07_FREE_FETCH_LIMIT
+            
+            if user.tier == UserTier.PREMIUM:
+                return False, -1  # Unlimited for premium
+            
+            today = datetime.now(timezone.utc).date()
+            last_fetch = user.last_fetch_date
+            
+            # Check if last fetch was today
+            if last_fetch and last_fetch.date() == today:
+                remaining = max(0, LASTPERSON07_FREE_FETCH_LIMIT - user.fetch_count)
+                return remaining == 0, remaining
+            else:
+                # New day, reset count
+                await self.db.update_one(
+                    "users",
+                    {"_id": user_id},
+                    {"$set": {"fetch_count": 0}}
                 )
+                return False, LASTPERSON07_FREE_FETCH_LIMIT
                 
-                # Test connection
-                await self.client.admin.command('ping')
-                self.database = self.client.get_default_database()
-                self.is_connected = True
-                
-                logger.info("Successfully connected to MongoDB")
-                return True
-                
-            except (ConnectionFailure, ServerSelectionTimeoutError) as e:
-                logger.error(f"Failed to connect to MongoDB: {str(e)}")
-                self.is_connected = False
-                self.client = None
-                return False
+        except Exception as e:
+            logger.error(f"Error checking daily limit for user {user_id}: {str(e)}")
+            return False, 0
+    
+    async def upgrade_to_premium(self, user_id: int, 
+                                expiration: Optional[datetime] = None) -> bool:
+        """Upgrade user to premium tier."""
+        try:
+            update = {
+                "$set": {
+                    "tier": UserTier.PREMIUM.value,
+                    "expiration": expiration
+                }
+            }
+            
+            result = await self.db.update_one("users", {"_id": user_id}, update)
+            
+            if result:
+                logger.info(f"User {user_id} upgraded to premium")
+            return result
+        except Exception as e:
+            logger.error(f"Error upgrading user {user_id} to premium: {str(e)}")
+            return False
+    
+    async def downgrade_to_free(self, user_id: int) -> bool:
+        """Downgrade user to free tier."""
+        try:
+            update = {
+                "$set": {
+                    "tier": UserTier.FREE.value,
+                    "expiration": None
+                }
+            }
+            
+            result = await self.db.update_one("users", {"_id": user_id}, update)
+            
+            if result:
+                logger.info(f"User {user_id} downgraded to free")
+            return result
+        except Exception as e:
+            logger.error(f"Error downgrading user {user_id} to free: {str(e)}")
+            return False
+    
+    async def ban_user(self, user_id: int) -> bool:
+        """Ban a user."""
+        try:
+            result = await self.db.update_one(
+                "users",
+                {"_id": user_id},
+                {"$set": {"banned": True}}
+            )
+            
+            if result:
+                logger.info(f"User {user_id} has been banned")
+            return result
+        except Exception as e:
+            logger.error(f"Error banning user {user_id}: {str(e)}")
+            return False
+    
+    async def unban_user(self, user_id: int) -> bool:
+        """Unban a user."""
+        try:
+            result = await self.db.update_one(
+                "users",
+                {"_id": user_id},
+                {"$set": {"banned": False}}
+            )
+            
+            if result:
+                logger.info(f"User {user_id} has been unbanned")
+            return result
+        except Exception as e:
+            logger.error(f"Error unbanning user {user_id}: {str(e)}")
+            return False
+    
+    async def get_all_users(self, tier: Optional[str] = None, 
+                           banned: Optional[bool] = None) -> List[Dict[str, Any]]:
+        """Get all users with optional filters."""
+        try:
+            query = {}
+            
+            if tier:
+                query["tier"] = tier
+            if banned is not None:
+                query["banned"] = banned
+            
+            users = await self.db.find_many("users", query, limit=1000)
+            return users
+        except Exception as e:
+            logger.error(f"Error getting all users: {str(e)}")
+            return []
+    
+    async def create_schedule(self, channel_id: int, interval: str, 
+                            category: str) -> bool:
+        """Create a new schedule."""
+        try:
+            schedule = LastPerson07Schedule(
+                _id=None,
+                channel_id=channel_id,
+                interval=ScheduleInterval(interval),
+                category=category
+            )
+            
+            result = await self.db.insert_one("schedules", schedule.to_dict())
+            return result is not None
+        except Exception as e:
+            logger.error(f"Error creating schedule: {str(e)}")
+            return False
+    
+    async def get_schedules(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        """Get all schedules."""
+        try:
+            query = {}
+            if active_only:
+                query["active"] = True
+            
+            schedules = await self.db.find_many("schedules", query, limit=100)
+            return schedules
+        except Exception as e:
+            logger.error(f"Error getting schedules: {str(e)}")
+            return []
+    
+    async def update_schedule_last_post(self, channel_id: int) -> bool:
+        """Update schedule's last post time."""
+        try:
+            now = datetime.now(timezone.utc)
+            result = await self.db.update_one(
+                "schedules",
+                {"channel_id": channel_id},
+                {"$set": {"last_post_time": now}}
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Error updating schedule last post: {str(e)}")
+            return False
+    
+    async def get_bot_settings(self) -> LastPerson07BotSettings:
+        """Get global bot settings."""
+        try:
+            settings_data = await self.db.find_one("bot_settings", {"_id": "settings"})
+            
+            if settings_data:
+                return LastPerson07BotSettings.from_dict(settings_data)
+            else:
+                # Create default settings
+                default_settings = LastPerson07BotSettings()
+                await self.db.insert_one("bot_settings", default_settings.to_dict())
+                return default_settings
+        except Exception as e:
+            logger.error(f"Error getting bot settings: {str(e)}")
+            return LastPerson07BotSettings()
+    
+    async def update_bot_settings(self, settings: Dict[str, Any]) -> bool:
+        """Update global bot settings."""
+        try:
+            result = await self.db.update_one(
+                "bot_settings",
+                {"_id": "settings"},
+                {"$set": settings},
+                upsert=True
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Error updating bot settings: {str(e)}")
+            return False
+    
+    async def add_api_url(self, url: str, source_name: str, 
+                         api_key: Optional[str] = None) -> bool:
+        """Add a new API URL."""
+        try:
+            api_url = LastPerson07ApiUrl(
+                _id=None,
+                url=url,
+                source_name=source_name,
+                api_key=api_key
+            )
+            
+            result = await self.db.insert_one("api_urls", api_url.to_dict())
+            return result is not None
+        except Exception as e:
+            logger.error(f"Error adding API URL: {str(e)}")
+            return False
+    
+    async def get_api_urls(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        """Get all API URLs."""
+        try:
+            query = {}
+            if active_only:
+                query["active"] = True
+            
+            urls = await self.db.find_many("api_urls", query, limit=50)
+            return urls
+        except Exception as e:
+            logger.error(f"Error getting API URLs: {str(e)}")
+            return []
+    
+    async def remove_api_url(self, url: str) -> bool:
+        """Remove an API URL."""
+        try:
+            result = await self.db.delete_one("api_urls", {"url": url})
+            return result
+        except Exception as e:
+            logger.error(f"Error removing API URL {url}: {str(e)}")
+            return False
+    
+    async def get_statistics(self) -> Dict[str, Any]:
+        """Get comprehensive bot statistics."""
+        try:
+            stats = {
+                "total_users": await self.db.count_documents("users", {}),
+                "premium_users": await self.db.count_documents("users", {"tier": "premium"}),
+                "free_users": await self.db.count_documents("users", {"tier": "free"}),
+                "banned_users": await self.db.count_documents("users", {"banned": True}),
+                "active_schedules": await self.db.count_documents("schedules", {"active": True}),
+            }
+            
+            # Calculate total fetches
+            try:
+                pipeline = [
+                    {"$group": {"_id": None, "total_fetches": {"$sum": "$fetch_count"}}}
+                ]
+                results = await self.db.aggregate("users", pipeline)
+                if results:
+                    stats["total_fetches"] = results[0].get("total_fetches", 0)
+                else:
+                    stats["total_fetches"] = 0
             except Exception as e:
-                logger.error(f"Unexpected error connecting to MongoDB: {str(e)}")
-                self.is_connected = False
-                self.client = None
-                return False
-    
-    async def disconnect(self) -> None:
-        """Close database connection."""
-        if self.client:
-            self.client.close()
-            self.is_connected = False
-            logger.info("Disconnected from MongoDB")
-    
-    async def ensure_connection(self) -> bool:
-        """Ensure database connection is active."""
-        if not self.is_connected:
-            return await self.connect()
-        return True
-    
-    async def get_collection(self, collection_name: str):
-        """Get a collection instance with connection check."""
-        if await self.ensure_connection():
-            return self.database[collection_name]
-        return None
-    
-    async def create_indexes(self) -> None:
-        """Create necessary indexes for optimal performance."""
-        if not await self.ensure_connection():
-            return
+                logger.error(f"Error calculating total fetches: {str(e)}")
+                stats["total_fetches"] = 0
             
-        try:
-            # Users collection indexes (fix _id index issue)
-            users = self.database.users
-            await users.create_index("username")
-            await users.create_index("tier")
-            await users.create_index("banned")
-            # Don't create _id index as it's automatically unique
-            
-            # Schedules collection indexes
-            schedules = self.database.schedules
-            await schedules.create_index([("channel_id", 1), ("interval", 1)])
-            await schedules.create_index("last_post_time")
-            
-            # API URLs collection index
-            api_urls = self.database.api_urls
-            await api_urls.create_index("url", unique=True)
-            
-            # Bot settings collection index
-            bot_settings = self.database.bot_settings
-            await bot_settings.create_index("_id", unique=True)
-            
-            logger.info("Created database indexes successfully")
-            
+            return stats
         except Exception as e:
-            logger.error(f"Error creating indexes: {str(e)}")
-    
-    async def insert_one(self, collection: str, document: Dict[str, Any]) -> Optional[Any]:
-        """Insert a single document."""
-        coll = await self.get_collection(collection)
-        if not coll:
-            return None
-            
-        try:
-            result = await coll.insert_one(document)
-            logger.debug(f"Inserted document in {collection} with ID: {result.inserted_id}")
-            return result.inserted_id
-        except Exception as e:
-            logger.error(f"Error inserting document in {collection}: {str(e)}")
-            return None
-    
-    async def find_one(self, collection: str, query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Find a single document."""
-        coll = await self.get_collection(collection)
-        if not coll:
-            return None
-            
-        try:
-            document = await coll.find_one(query)
-            return document
-        except Exception as e:
-            logger.error(f"Error finding document in {collection}: {str(e)}")
-            return None
-    
-    async def find_many(self, collection: str, query: Dict[str, Any], 
-                       limit: int = 100, skip: int = 0) -> list:
-        """Find multiple documents."""
-        coll = await self.get_collection(collection)
-        if not coll:
-            return []
-            
-        try:
-            cursor = coll.find(query).skip(skip).limit(limit)
-            documents = await cursor.to_list(length=limit)
-            return documents
-        except Exception as e:
-            logger.error(f"Error finding documents in {collection}: {str(e)}")
-            return []
-    
-    async def update_one(self, collection: str, query: Dict[str, Any], 
-                        update: Dict[str, Any], upsert: bool = False) -> bool:
-        """Update a single document."""
-        coll = await self.get_collection(collection)
-        if not coll:
-            return False
-            
-        try:
-            await coll.update_one(query, update, upsert=upsert)
-            logger.debug(f"Updated document in {collection} with query: {query}")
-            return True
-        except Exception as e:
-            logger.error(f"Error updating document in {collection}: {str(e)}")
-            return False
-    
-    async def update_many(self, collection: str, query: Dict[str, Any], 
-                         update: Dict[str, Any]) -> bool:
-        """Update multiple documents."""
-        coll = await self.get_collection(collection)
-        if not coll:
-            return False
-            
-        try:
-            result = await coll.update_many(query, update)
-            logger.debug(f"Updated {result.modified_count} documents in {collection}")
-            return True
-        except Exception as e:
-            logger.error(f"Error updating documents in {collection}: {str(e)}")
-            return False
-    
-    async def delete_one(self, collection: str, query: Dict[str, Any]) -> bool:
-        """Delete a single document."""
-        coll = await self.get_collection(collection)
-        if not coll:
-            return False
-            
-        try:
-            await coll.delete_one(query)
-            logger.debug(f"Deleted document from {collection} with query: {query}")
-            return True
-        except Exception as e:
-            logger.error(f"Error deleting document from {collection}: {str(e)}")
-            return False
-    
-    async def count_documents(self, collection: str, query: Dict[str, Any]) -> int:
-        """Count documents matching query."""
-        coll = await self.get_collection(collection)
-        if not coll:
-            return 0
-            
-        try:
-            count = await coll.count_documents(query)
-            return count
-        except Exception as e:
-            logger.error(f"Error counting documents in {collection}: {str(e)}")
-            return 0
-    
-    async def aggregate(self, collection: str, pipeline: list) -> list:
-        """Execute aggregation pipeline."""
-        coll = await self.get_collection(collection)
-        if not coll:
-            return []
-            
-        try:
-            cursor = coll.aggregate(pipeline)
-            results = await cursor.to_list(length=1000)
-            return results
-        except Exception as e:
-            logger.error(f"Error aggregating in {collection}: {str(e)}")
-            return []
+            logger.error(f"Error getting statistics: {str(e)}")
+            return {}
 
-# Global database client instance
-lastperson07_db_client = LastPerson07DatabaseClient()
+# Create global queries instance
+lastperson07_queries = LastPerson07Queries()
