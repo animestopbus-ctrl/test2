@@ -1,19 +1,37 @@
 """health_check.py - Simple health check for Render"""
 
-import asyncio
+import os
 import sys
-from app import lastperson07_bot
+import asyncio
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
 
 async def health_check():
     """Perform health check."""
     try:
+        # Check required environment variables
+        telegram_token = os.getenv("TELEGRAM_TOKEN")
+        if not telegram_token:
+            print("❌ TELEGRAM_TOKEN not set")
+            return False
+        
+        # Check if we can import main modules
+        try:
+            from app import lastperson07_bot
+        except ImportError as e:
+            print(f"❌ Failed to import app: {e}")
+            return False
+        
         # Check if bot is running
-        if lastperson07_bot and lastperson07_bot.running:
+        if hasattr(lastperson07_bot, 'running') and lastperson07_bot.running:
             print("✅ Bot is running")
             return True
         else:
             print("❌ Bot is not running")
             return False
+            
     except Exception as e:
         print(f"❌ Health check failed: {str(e)}")
         return False
