@@ -57,19 +57,28 @@ except ImportError as e:
     logger.error(f"Failed to import database modules: {e}")
     sys.exit(1)
 
-# Import utility modules with error handling
+# Import utility modules with error handling and fallbacks
 try:
     from utils.scheduler import lastperson07_init_scheduler
     from utils.broadcaster import lastperson07_init_broadcaster
+    logger.info("Successfully imported utility modules")
 except ImportError as e:
     logger.error(f"Failed to import utility modules: {e}")
-    sys.exit(1)
+    # Create dummy functions to avoid crashes
+    async def dummy_init_scheduler(app):
+        return None
+    async def dummy_init_broadcaster(bot):
+        return None
+    lastperson07_init_scheduler = dummy_init_scheduler
+    lastperson07_init_broadcaster = dummy_init_broadcaster
+    logger.warning("Using dummy utility functions")
 
 # Import handlers with error handling
 try:
     from handlers.user_handlers import lastperson07_register_user_handlers
     from handlers.admin_handlers import lastperson07_register_admin_handlers
     from handlers.error_handler import lastperson07_register_error_handler
+    logger.info("Successfully imported handler modules")
 except ImportError as e:
     logger.error(f"Failed to import handler modules: {e}")
     sys.exit(1)
@@ -164,7 +173,10 @@ class LastPerson07Bot:
             try:
                 logger.info("Initializing scheduler...")
                 self.scheduler_instance = await lastperson07_init_scheduler(self.application)
-                logger.info("Scheduler initialized")
+                if self.scheduler_instance:
+                    logger.info("Scheduler initialized")
+                else:
+                    logger.warning("Scheduler initialization returned None")
             except Exception as e:
                 logger.warning(f"Failed to initialize scheduler: {str(e)}")
                 # Don't fail completely if scheduler fails
