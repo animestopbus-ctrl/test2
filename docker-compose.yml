@@ -13,19 +13,30 @@ services:
       - "27017:27017"
     networks:
       - lastperson07_network
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongo localhost:27017/test --quiet
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   bot:
     build: .
     container_name: lastperson07_bot
     restart: unless-stopped
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
     env_file:
       - .env
     volumes:
       - ./logs:/app/logs
     networks:
       - lastperson07_network
+    healthcheck:
+      test: python health_check.py
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   mongodb_data:
