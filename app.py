@@ -1,8 +1,3 @@
-"""Main Application for LastPerson07Bot
-
-This module contains the main bot application setup and entry point.
-"""
-
 import logging
 import asyncio
 import sys
@@ -116,6 +111,7 @@ class LastPerson07Bot:
                 logger.info("Stopping bot...")
                 
                 # Stop scheduler
+                from utils.scheduler import lastperson07_scheduler
                 if lastperson07_scheduler:
                     await lastperson07_scheduler.stop()
                 
