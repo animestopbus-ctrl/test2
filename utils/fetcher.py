@@ -1,17 +1,18 @@
 """Wallpaper Fetcher for LastPerson07Bot
 
 This module handles fetching wallpapers from multiple APIs with fallback,
-image validation, and temporary file management.
+image validation, and temporary file management using Pillow.
 """
 
 import os
 import logging
 import asyncio
 import aiohttp
+from PIL import Image
 from typing import Optional, Tuple, Dict, Any
 from datetime import datetime
 import tempfile
-from urllib.parse import quote
+import re
 
 from config.config import (
     LASTPERSON07_API_ENDPOINTS, LASTPERSON07_MIN_IMAGE_WIDTH,
@@ -34,19 +35,16 @@ class LastPerson07WallpaperFetcher:
             "pexels": LASTPERSON07_PEXELS_KEY,
             "pixabay": LASTPERSON07_PIXABAY_KEY
         }
-        self.opencv_available = self._check_opencv()
+        self.pillow_available = self._check_pillow()
     
-    def _check_opencv(self) -> bool:
-        """Check if OpenCV is available and working."""
+    def _check_pillow(self) -> bool:
+        """Check if Pillow is available and working."""
         try:
-            import cv2
-            # Test basic OpenCV functionality
-            import numpy as np
-            test_img = np.zeros((100, 100, 3), dtype=np.uint8)
-            _ = cv2.imread("")  # This will fail but we catch it
+            # Test basic Pillow functionality
+            test_img = Image.new('RGB', (100, 100), color='red')
             return True
         except Exception as e:
-            logger.warning(f"OpenCV not available: {str(e)}. Image validation will be skipped.")
+            logger.error(f"Pillow not available: {str(e)}. Image validation will be skipped.")
             return False
     
     async def fetch_wallpaper(self, category: str = LASTPERSON07_DEFAULT_CATEGORY) -> Optional[LastPerson07WallpaperData]:
@@ -60,8 +58,8 @@ class LastPerson07WallpaperFetcher:
                 wallpaper_data = await self.lastperson07_fetch_from_api(api_source, sanitized_category)
                 
                 if wallpaper_data:
-                    # Download and validate image (skip if OpenCV not available)
-                    if not self.opencv_available or await self.lastperson07_download_and_validate_image(wallpaper_data.image_url):
+                    # Download and validate image (skip validation if Pillow not available)
+                    if not self.pillow_available or await self.lastperson07_download_and_validate_image(wallpaper_data.image_url):
                         logger.info(f"Successfully fetched wallpaper from {api_source}")
                         return wallpaper_data
                     else:
@@ -235,19 +233,15 @@ class LastPerson07WallpaperFetcher:
         return None
     
     async def lastperson07_download_and_validate_image(self, image_url: str) -> bool:
-        """Download image and validate resolution."""
-        # Skip OpenCV validation if not available
-        if not self.opencv_available:
-            logger.info("Skipping image validation (OpenCV not available)")
+        """Download image and validate resolution using Pillow."""
+        # Skip validation if Pillow not available
+        if not self.pillow_available:
+            logger.info("Skipping image validation (Pillow not available)")
             return True
         
         temp_file = None
         
         try:
-            # Import OpenCV only when needed
-            import cv2
-            import numpy as np
-            
             # Create temporary file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
             temp_path = temp_file.name
@@ -262,7 +256,8 @@ class LastPerson07WallpaperFetcher:
                         content_length = response.headers.get('content-length')
                         if content_length and int(content_length) > LASTPERSON07_MAX_FILE_SIZE_MB * 1024 * 1024:
                             logger.warning(f"Image too large: {content_length} bytes")
-                            os.unlink(temp_path)
+                            if os.path.exists(temp_path):
+                                os.unlink(temp_path)
                             return False
                         
                         # Download the image
@@ -271,32 +266,44 @@ class LastPerson07WallpaperFetcher:
                                 f.write(chunk)
                     else:
                         logger.error(f"Failed to download image: HTTP {response.status}")
-                        os.unlink(temp_path)
+                        if os.path.exists(temp_path):
+                            os.unlink(temp_path)
                         return False
             
-            # Validate image with OpenCV
-            image = cv2.imread(temp_path)
-            if image is None:
-                logger.error("Failed to read image with OpenCV")
-                os.unlink(temp_path)
+            # Validate image with Pillow
+            try:
+                with Image.open(temp_path) as img:
+                    width, height = img.size
+                    
+                    # Check minimum resolution
+                    if width < LASTPERSON07_MIN_IMAGE_WIDTH or height < LASTPERSON07_MIN_IMAGE_HEIGHT:
+                        logger.warning(f"Image resolution too small: {width}x{height}")
+                        if os.path.exists(temp_path):
+                            os.unlink(temp_path)
+                        return False
+                    
+                    # Verify image format
+                    if img.format not in ['JPEG', 'JPG', 'PNG', 'WEBP']:
+                        logger.warning(f"Unsupported image format: {img.format}")
+                        if os.path.exists(temp_path):
+                            os.unlink(temp_path)
+                        return False
+                    
+                    logger.info(f"Image validated successfully: {width}x{height} ({img.format})")
+                    if os.path.exists(temp_path):
+                        os.unlink(temp_path)
+                    return True
+                    
+            except Exception as e:
+                logger.error(f"Failed to validate image with Pillow: {str(e)}")
+                if os.path.exists(temp_path):
+                    os.unlink(temp_path)
                 return False
-            
-            height, width = image.shape[:2]
-            
-            # Check minimum resolution
-            if width < LASTPERSON07_MIN_IMAGE_WIDTH or height < LASTPERSON07_MIN_IMAGE_HEIGHT:
-                logger.warning(f"Image resolution too small: {width}x{height}")
-                os.unlink(temp_path)
-                return False
-            
-            logger.info(f"Image validated successfully: {width}x{height}")
-            os.unlink(temp_path)
-            return True
             
         except Exception as e:
             logger.error(f"Error validating image: {str(e)}")
-            if temp_file and os.path.exists(temp_path):
-                os.unlink(temp_path)
+            if temp_file and os.path.exists(temp_path.name):
+                os.unlink(temp_file.name)
             return False
     
     def lastperson07_sanitize_category(self, category: str) -> str:
@@ -305,7 +312,6 @@ class LastPerson07WallpaperFetcher:
             return LASTPERSON07_DEFAULT_CATEGORY
         
         # Remove special characters and limit length
-        import re
         sanitized = re.sub(r'[^a-zA-Z0-9\s]', '', category)
         sanitized = ' '.join(sanitized.split())  # Remove extra spaces
         
