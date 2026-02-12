@@ -5,7 +5,7 @@ This module handles broadcasting messages to groups, channels, and users.
 
 import logging
 import asyncio
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from telegram import Bot
 from telegram.ext import ContextTypes
 
