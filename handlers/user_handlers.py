@@ -164,7 +164,215 @@ class LastPerson07UserHandlers:
             logger.error(f"Error in fetch handler: {str(e)}")
             await update.message.reply_text(LASTPERSON07_MESSAGES["fetch_error"])
     
-    # ... (other handler methods remain the same, just fixing None checks) ...
+    async def lastperson07_handle_myplan(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /myplan command."""
+        try:
+            if REACTIONS_AVAILABLE:
+                await lastperson07_add_reaction_to_user_message(update, context)
+            
+            user = update.effective_user
+            db_user = await lastperson07_queries.get_user(user.id)
+            
+            if db_user is None:
+                await update.message.reply_text("Please use /start first")
+                return
+            
+            # Check daily limit
+            reached_limit, remaining = await lastperson07_queries.check_daily_limit(user.id)
+            
+            if db_user.tier == UserTier.PREMIUM:
+                message = "*✨ Premium Plan*\n\nYou have unlimited access to wallpapers!"
+            else:
+                message = f"*ℹ️ Free Plan*\n\nDaily limit: {LASTPERSON07_FREE_FETCH_LIMIT - remaining}/{LASTPERSON07_FREE_FETCH_LIMIT} used"
+            
+            await update.message.reply_text(message, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error in myplan handler: {str(e)}")
+    
+    async def lastperson07_handle_premium(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /premium command."""
+        try:
+            if REACTIONS_AVAILABLE:
+                await lastperson07_add_reaction_to_user_message(update, context)
+            
+            keyboard = lastperson07_create_premium_keyboard()
+            
+            await update.message.reply_text(
+                LASTPERSON07_MESSAGES["premium_info"],
+                parse_mode="Markdown",
+                reply_markup=keyboard
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in premium handler: {str(e)}")
+    
+    async def lastperson07_handle_buy(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /buy command."""
+        try:
+            if REACTIONS_AVAILABLE:
+                await lastperson07_add_reaction_to_user_message(update, context)
+            
+            contact_button = InlineKeyboardButton(
+                "Contact Owner to Buy",
+                url=f"https://t.me/{LASTPERSON07_OWNER_USERNAME}"
+            )
+            keyboard = InlineKeyboardMarkup([[contact_button]])
+            
+            await update.message.reply_text(
+                "To purchase premium, contact the owner:",
+                reply_markup=keyboard
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in buy handler: {str(e)}")
+    
+    async def lastperson07_handle_categories(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /categories command."""
+        try:
+            if REACTIONS_AVAILABLE:
+                await lastperson07_add_reaction_to_user_message(update, context)
+            
+            categories_list = "\n".join([f"• {cat.title()}" for cat in LASTPERSON07_CATEGORIES])
+            
+            await update.message.reply_text(
+                LASTPERSON07_MESSAGES["categories"].format(categories_list=categories_list),
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in categories handler: {str(e)}")
+    
+    async def lastperson07_handle_help(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /help command."""
+        try:
+            if REACTIONS_AVAILABLE:
+                await lastperson07_add_reaction_to_user_message(update, context)
+            
+            categories_list = "\n".join([f"• {cat.title()}" for cat in LASTPERSON07_CATEGORIES])
+            
+            await update.message.reply_text(
+                LASTPERSON07_MESSAGES["help"].format(
+                    categories_list=categories_list,
+                    owner=LASTPERSON07_OWNER_USERNAME
+                ),
+                parse_mode="Markdown"
+            )
+            
+        except Exception as e:
+            logger.error(f"Error in help handler: {str(e)}")
+    
+    async def lastperson07_handle_info(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /info command."""
+        try:
+            if REACTIONS_AVAILABLE:
+                await lastperson07_add_reaction_to_user_message(update, context)
+            
+            info_text = f"""*🤖 LastPerson07 Wallpaper Bot*
+
+*Version:* 1.0.0
+*Description:* Fetch beautiful wallpapers from multiple sources
+
+*Features:*
+• High-quality wallpapers (≥1920×1080)
+• Multiple categories
+• Free and premium tiers
+• Scheduled posting
+
+*APIs:*
+• Unsplash
+• Pexels
+• Pixabay
+
+*Contact:* @{LASTPERSON07_OWNER_USERNAME}"""
+            
+            await update.message.reply_text(info_text, parse_mode="Markdown")
+            
+        except Exception as e:
+            logger.error(f"Error in info handler: {str(e)}")
+    
+    async def lastperson07_handle_report(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /report command."""
+        try:
+            if REACTIONS_AVAILABLE:
+                await lastperson07_add_reaction_to_user_message(update, context)
+            
+            if not context.args:
+                await update.message.reply_text("Usage: /report <issue description>")
+                return
+            
+            report_text = " ".join(context.args)
+            
+            # Log report
+            logger.warning(f"User report from {update.effective_user.id}: {report_text}")
+            
+            await update.message.reply_text("✅ Your report has been sent to the admin.")
+            
+        except Exception as e:
+            logger.error(f"Error in report handler: {str(e)}")
+    
+    async def lastperson07_handle_feedback(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /feedback command."""
+        try:
+            if REACTIONS_AVAILABLE:
+                await lastperson07_add_reaction_to_user_message(update, context)
+            
+            if not context.args:
+                await update.message.reply_text("Usage: /feedback <your feedback>")
+                return
+            
+            feedback_text = " ".join(context.args)
+            
+            # Log feedback
+            logger.info(f"User feedback from {update.effective_user.id}: {feedback_text}")
+            
+            await update.message.reply_text("✅ Thank you for your feedback!")
+            
+        except Exception as e:
+            logger.error(f"Error in feedback handler: {str(e)}")
+    
+    async def lastperson07_handle_schedule(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        """Handle /schedule command."""
+        try:
+            if REACTIONS_AVAILABLE:
+                await lastperson07_add_reaction_to_user_message(update, context)
+            
+            user = update.effective_user
+            db_user = await lastperson07_queries.get_user(user.id)
+            
+            if db_user is None:
+                await update.message.reply_text("Please use /start first")
+                return
+            
+            # Check if user is admin
+            from handlers.admin_handlers import lastperson07_admin_handlers
+            if not await lastperson07_admin_handlers.lastperson07_check_admin(user.id):
+                await update.message.reply_text("⛔ Admin access required")
+                return
+            
+            if not context.args or len(context.args) < 2:
+                await update.message.reply_text("Usage: /schedule <interval> <category>")
+                return
+            
+            interval = context.args[0].lower()
+            category = context.args[1]
+            
+            if interval not in ["hourly", "daily"]:
+                await update.message.reply_text("Interval must be 'hourly' or 'daily'")
+                return
+            
+            # Create schedule
+            chat_id = update.effective_chat.id
+            success = await lastperson07_queries.create_schedule(chat_id, interval, category)
+            
+            if success:
+                await update.message.reply_text(f"✅ Schedule created: {interval} posts of {category}")
+            else:
+                await update.message.reply_text("❌ Failed to create schedule")
+                
+        except Exception as e:
+            logger.error(f"Error in schedule handler: {str(e)}")
+            await update.message.reply_text("An error occurred")
     
     async def lastperson07_handle_callback_query(self, update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         """Handle callback queries from inline keyboards."""
@@ -287,4 +495,5 @@ def lastperson07_register_user_handlers(application):
     application.add_handler(CommandHandler("info", lastperson07_user_handlers.lastperson07_handle_info))
     application.add_handler(CommandHandler("report", lastperson07_user_handlers.lastperson07_handle_report))
     application.add_handler(CommandHandler("feedback", lastperson07_user_handlers.lastperson07_handle_feedback))
+    application.add_handler(CommandHandler("schedule", lastperson07_user_handlers.lastperson07_handle_schedule))
     application.add_handler(CallbackQueryHandler(lastperson07_user_handlers.lastperson07_handle_callback_query))
