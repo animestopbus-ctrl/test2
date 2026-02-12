@@ -28,7 +28,7 @@ class LastPerson07Queries:
         """Get user by Telegram ID."""
         try:
             user_data = await self.db.find_one("users", {"_id": user_id})
-            if user_data:
+            if user_data is not None:  # Fixed: explicitly check for None
                 return LastPerson07User.from_dict(user_data)
             return None
         except Exception as e:
@@ -72,7 +72,7 @@ class LastPerson07Queries:
         """Check if user has reached daily fetch limit."""
         try:
             user = await self.get_user(user_id)
-            if not user:
+            if user is None:
                 return False, LASTPERSON07_FREE_FETCH_LIMIT
             
             if user.tier == UserTier.PREMIUM:
@@ -82,7 +82,7 @@ class LastPerson07Queries:
             last_fetch = user.last_fetch_date
             
             # Check if last fetch was today
-            if last_fetch and last_fetch.date() == today:
+            if last_fetch is not None and last_fetch.date() == today:
                 remaining = max(0, LASTPERSON07_FREE_FETCH_LIMIT - user.fetch_count)
                 return remaining == 0, remaining
             else:
@@ -175,7 +175,7 @@ class LastPerson07Queries:
         try:
             query = {}
             
-            if tier:
+            if tier is not None:
                 query["tier"] = tier
             if banned is not None:
                 query["banned"] = banned
@@ -235,7 +235,7 @@ class LastPerson07Queries:
         try:
             settings_data = await self.db.find_one("bot_settings", {"_id": "settings"})
             
-            if settings_data:
+            if settings_data is not None:  # Fixed: explicitly check for None
                 return LastPerson07BotSettings.from_dict(settings_data)
             else:
                 # Create default settings
@@ -316,7 +316,7 @@ class LastPerson07Queries:
                     {"$group": {"_id": None, "total_fetches": {"$sum": "$fetch_count"}}}
                 ]
                 results = await self.db.aggregate("users", pipeline)
-                if results:
+                if results and len(results) > 0:
                     stats["total_fetches"] = results[0].get("total_fetches", 0)
                 else:
                     stats["total_fetches"] = 0
