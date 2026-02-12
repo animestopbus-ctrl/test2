@@ -1,4 +1,7 @@
+"""Promoter Module for LastPerson07Bot
 
+This module handles promotional buttons and user conversion.
+"""
 
 import logging
 from typing import Optional, List
@@ -8,7 +11,7 @@ from telegram.ext import ContextTypes
 # Import needed constants
 from config.config import (
     LASTPERSON07_PROMO_CHANNEL, 
-    LASTPERSON07_OWNER_USERNAME  # This was missing
+    LASTPERSON07_OWNER_USERNAME
 )
 from db.models import UserTier
 from db.queries import lastperson07_queries
