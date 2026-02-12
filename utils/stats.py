@@ -1,7 +1,3 @@
-"""Statistics Module for LastPerson07Bot
-
-This module provides system and database statistics utilities.
-"""
 
 import logging
 import sys
@@ -135,3 +131,4 @@ def lastperson07_db_unicode_format() -> str:
 │  ⏰ Active Schedules: 8                │
 │  🔄 Bot Uptime:       5d 14h 32m      │
 └──────────────────────────────────────┘"""
+
