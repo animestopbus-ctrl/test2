@@ -1,8 +1,4 @@
-"""LastPerson07Bot Configuration Module
-
-This module contains all configuration settings, constants, API endpoints,
-message templates, and other shared configuration data for the bot.
-"""
+"""Fixed config/config.py"""
 
 import os
 from typing import List, Dict, Any
@@ -32,6 +28,16 @@ LASTPERSON07_DEFAULT_DELAY_MINUTES = 5
 LASTPERSON07_MIN_IMAGE_WIDTH = 1920
 LASTPERSON07_MIN_IMAGE_HEIGHT = 1080
 LASTPERSON07_MAX_FILE_SIZE_MB = 20
+
+# MISSING CONSTANTS - ADD THESE:
+LASTPERSON07_DEFAULT_CATEGORY = "nature"
+LASTPERSON07_DB_NAME = "lastperson07"
+LASTPERSON07_COLLECTIONS = {
+    "users": "users",
+    "api_urls": "api_urls", 
+    "schedules": "schedules",
+    "bot_settings": "bot_settings"
+}
 
 # Emoji Reactions Pool
 LASTPERSON07_REACTIONS = [
@@ -144,15 +150,6 @@ Click the button below to contact the owner for payment
     "fetch_error": "*⚠️ Error Fetching Wallpaper*\n\nPlease try again in a moment.",
     "rate_limit": "*⏳ Please Wait*\n\nYou can send one command every 2 seconds.",
     "banned": "*🚫 Access Denied*\n\nYour account has been banned from using this bot."
-}
-
-# Database Settings
-LASTPERSON07_DB_NAME = "lastperson07"
-LASTPERSON07_COLLECTIONS = {
-    "users": "users",
-    "api_urls": "api_urls",
-    "schedules": "schedules",
-    "bot_settings": "bot_settings"
 }
 
 # Logging Configuration
