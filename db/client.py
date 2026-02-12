@@ -30,7 +30,7 @@ class LastPerson07DatabaseClient:
     async def connect(self) -> bool:
         """Establish connection to MongoDB."""
         async with self._connection_lock:
-            if self.is_connected and self.client:
+            if self.is_connected and self.client is not None:
                 return True
                 
             try:
@@ -43,7 +43,7 @@ class LastPerson07DatabaseClient:
                 
                 # Test connection
                 await self.client.admin.command('ping')
-                self.database = self.client[self.db_name]
+                self.database = self.client.get_default_database()
                 self.is_connected = True
                 
                 logger.info("Successfully connected to MongoDB")
@@ -62,7 +62,7 @@ class LastPerson07DatabaseClient:
     
     async def disconnect(self) -> None:
         """Close database connection."""
-        if self.client:
+        if self.client is not None:
             self.client.close()
             self.is_connected = False
             logger.info("Disconnected from MongoDB")
@@ -85,9 +85,8 @@ class LastPerson07DatabaseClient:
             return
             
         try:
-            # Users collection indexes
+            # Users collection indexes (no _id index since it's automatically unique)
             users = self.database.users
-            await users.create_index("_id", unique=True)
             await users.create_index("username")
             await users.create_index("tier")
             await users.create_index("banned")
@@ -97,6 +96,14 @@ class LastPerson07DatabaseClient:
             await schedules.create_index([("channel_id", 1), ("interval", 1)])
             await schedules.create_index("last_post_time")
             
+            # API URLs collection index
+            api_urls = self.database.api_urls
+            await api_urls.create_index("url", unique=True)
+            
+            # Bot settings collection index
+            bot_settings = self.database.bot_settings
+            await bot_settings.create_index("_id", unique=True)
+            
             logger.info("Created database indexes successfully")
             
         except Exception as e:
@@ -105,7 +112,7 @@ class LastPerson07DatabaseClient:
     async def insert_one(self, collection: str, document: Dict[str, Any]) -> Optional[Any]:
         """Insert a single document."""
         coll = await self.get_collection(collection)
-        if not coll:
+        if coll is None:
             return None
             
         try:
@@ -119,7 +126,7 @@ class LastPerson07DatabaseClient:
     async def find_one(self, collection: str, query: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Find a single document."""
         coll = await self.get_collection(collection)
-        if not coll:
+        if coll is None:
             return None
             
         try:
@@ -133,7 +140,7 @@ class LastPerson07DatabaseClient:
                        limit: int = 100, skip: int = 0) -> list:
         """Find multiple documents."""
         coll = await self.get_collection(collection)
-        if not coll:
+        if coll is None:
             return []
             
         try:
@@ -148,7 +155,7 @@ class LastPerson07DatabaseClient:
                         update: Dict[str, Any], upsert: bool = False) -> bool:
         """Update a single document."""
         coll = await self.get_collection(collection)
-        if not coll:
+        if coll is None:
             return False
             
         try:
@@ -163,7 +170,7 @@ class LastPerson07DatabaseClient:
                          update: Dict[str, Any]) -> bool:
         """Update multiple documents."""
         coll = await self.get_collection(collection)
-        if not coll:
+        if coll is None:
             return False
             
         try:
@@ -177,7 +184,7 @@ class LastPerson07DatabaseClient:
     async def delete_one(self, collection: str, query: Dict[str, Any]) -> bool:
         """Delete a single document."""
         coll = await self.get_collection(collection)
-        if not coll:
+        if coll is None:
             return False
             
         try:
@@ -191,7 +198,7 @@ class LastPerson07DatabaseClient:
     async def count_documents(self, collection: str, query: Dict[str, Any]) -> int:
         """Count documents matching query."""
         coll = await self.get_collection(collection)
-        if not coll:
+        if coll is None:
             return 0
             
         try:
@@ -204,7 +211,7 @@ class LastPerson07DatabaseClient:
     async def aggregate(self, collection: str, pipeline: list) -> list:
         """Execute aggregation pipeline."""
         coll = await self.get_collection(collection)
-        if not coll:
+        if coll is None:
             return []
             
         try:
