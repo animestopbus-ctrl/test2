@@ -5,7 +5,7 @@ This module handles job scheduling for automated wallpaper posting.
 
 import logging
 import asyncio
-from typing import Optional  # Added missing import
+from typing import Optional
 from datetime import datetime, timezone
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
@@ -18,8 +18,16 @@ from utils.fetcher import lastperson07_wallpaper_fetcher
 from utils.promoter import lastperson07_add_promo_button_if_free
 from utils.metadata import lastperson07_format_wallpaper_caption
 
-# Import the correct function
-from utils.reactions import lastperson07_add_random_reaction
+# Import reactions with fallback
+try:
+    from utils.reactions import lastperson07_add_random_reaction
+    REACTIONS_AVAILABLE = True
+except ImportError:
+    logger = logging.getLogger(__name__)
+    logger.warning("Reactions module not available, continuing without reactions")
+    REACTIONS_AVAILABLE = False
+    async def lastperson07_add_random_reaction(*args, **kwargs):
+        return False
 
 # Setup logging
 logger = logging.getLogger(__name__)
@@ -52,38 +60,42 @@ class LastPerson07Scheduler:
     
     async def lastperson07_load_schedules(self):
         """Load schedules from database and create jobs."""
-        schedules = await lastperson07_queries.get_schedules(active_only=True)
-        
-        for schedule_data in schedules:
-            try:
-                channel_id = schedule_data["channel_id"]
-                interval = schedule_data["interval"]
-                category = schedule_data.get("category", LASTPERSON07_DEFAULT_CATEGORY)
-                
-                # Create trigger based on interval
-                if interval == "hourly":
-                    trigger = IntervalTrigger(hours=1)
-                elif interval == "daily":
-                    trigger = IntervalTrigger(days=1)
-                else:
-                    logger.warning(f"Unknown interval: {interval}")
-                    continue
-                
-                # Add job
-                job_id = f"schedule_{channel_id}_{interval}"
-                self.scheduler.add_job(
-                    func=self.lastperson07_post_wallpaper_job,
-                    trigger=trigger,
-                    args=[channel_id, category],
-                    id=job_id,
-                    name=f"Wallpaper posting for {channel_id}",
-                    replace_existing=True
-                )
-                
-                logger.info(f"Added scheduled job: {job_id}")
-                
-            except Exception as e:
-                logger.error(f"Error loading schedule {schedule_data}: {str(e)}")
+        try:
+            schedules = await lastperson07_queries.get_schedules(active_only=True)
+            
+            for schedule_data in schedules:
+                try:
+                    channel_id = schedule_data["channel_id"]
+                    interval = schedule_data["interval"]
+                    category = schedule_data.get("category", LASTPERSON07_DEFAULT_CATEGORY)
+                    
+                    # Create trigger based on interval
+                    if interval == "hourly":
+                        trigger = IntervalTrigger(hours=1)
+                    elif interval == "daily":
+                        trigger = IntervalTrigger(days=1)
+                    else:
+                        logger.warning(f"Unknown interval: {interval}")
+                        continue
+                    
+                    # Add job
+                    job_id = f"schedule_{channel_id}_{interval}"
+                    self.scheduler.add_job(
+                        func=self.lastperson07_post_wallpaper_job,
+                        trigger=trigger,
+                        args=[channel_id, category],
+                        id=job_id,
+                        name=f"Wallpaper posting for {channel_id}",
+                        replace_existing=True
+                    )
+                    
+                    logger.info(f"Added scheduled job: {job_id}")
+                    
+                except Exception as e:
+                    logger.error(f"Error loading schedule {schedule_data}: {str(e)}")
+                    
+        except Exception as e:
+            logger.error(f"Error loading schedules: {str(e)}")
     
     async def lastperson07_add_schedule(self, channel_id: int, interval: str, category: str):
         """Add a new schedule."""
@@ -171,12 +183,17 @@ class LastPerson07Scheduler:
                 reply_markup=reply_markup
             )
             
-            # Add reaction
-            await lastperson07_add_random_reaction(
-                self.application,
-                channel_id,
-                sent_message.message_id
-            )
+            # Add reaction with fallback
+            if REACTIONS_AVAILABLE:
+                try:
+                    await lastperson07_add_random_reaction(
+                        self.application,
+                        channel_id,
+                        sent_message.message_id
+                    )
+                except Exception as e:
+                    logger.debug(f"Could not add reaction to scheduled post: {str(e)}")
+                    # Continue even if reaction fails
             
             # Update schedule
             await lastperson07_queries.update_schedule_last_post(channel_id)
@@ -189,20 +206,27 @@ class LastPerson07Scheduler:
     async def lastperson07_get_job_list(self) -> list:
         """Get list of all scheduled jobs."""
         jobs = []
-        for job in self.scheduler.get_jobs():
-            jobs.append({
-                "id": job.id,
-                "name": job.name,
-                "next_run_time": job.next_run_time
-            })
+        try:
+            for job in self.scheduler.get_jobs():
+                jobs.append({
+                    "id": job.id,
+                    "name": job.name,
+                    "next_run_time": job.next_run_time
+                })
+        except Exception as e:
+            logger.error(f"Error getting job list: {str(e)}")
         return jobs
 
 # Global scheduler instance
 lastperson07_scheduler: Optional[LastPerson07Scheduler] = None
 
-async def lastperson07_init_scheduler(application: Application) -> LastPerson07Scheduler:
+async def lastperson07_init_scheduler(application: Application) -> Optional[LastPerson07Scheduler]:
     """Initialize scheduler instance."""
     global lastperson07_scheduler
-    lastperson07_scheduler = LastPerson07Scheduler(application)
-    await lastperson07_scheduler.start()
-    return lastperson07_scheduler
+    try:
+        lastperson07_scheduler = LastPerson07Scheduler(application)
+        await lastperson07_scheduler.start()
+        return lastperson07_scheduler
+    except Exception as e:
+        logger.error(f"Failed to initialize scheduler: {str(e)}")
+        return None
