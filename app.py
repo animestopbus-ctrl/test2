@@ -1,40 +1,62 @@
+"""Main Application for LastPerson07Bot
+
+This module contains the main bot application setup and entry point.
+"""
+
 import logging
 import asyncio
 import sys
 import signal
+import os
 from datetime import datetime
 from dotenv import load_dotenv
 
-from telegram.ext import Application, CommandHandler
-from telegram import __version__ as ptb_version
+# Try to import telegram with fallback
+try:
+    from telegram.ext import Application, CommandHandler
+    from telegram import __version__ as ptb_version
+    PTB_AVAILABLE = True
+except ImportError as e:
+    logging.error(f"Failed to import telegram library: {e}")
+    PTB_AVAILABLE = False
 
 # Load environment variables
 load_dotenv()
 
-# Import configuration and modules
-from config.config import (
-    LASTPERSON07_TELEGRAM_TOKEN, LASTPERSON07_LOG_FORMAT,
-    LASTPERSON07_LOG_FILE, LASTPERSON07_MESSAGES,
-    LASTPERSON07_RATE_LIMIT_SECONDS
-)
-from db.client import lastperson07_db_client
-from db.queries import lastperson07_queries
-from utils.scheduler import lastperson07_init_scheduler
-from utils.broadcaster import lastperson07_init_broadcaster
-from handlers.user_handlers import lastperson07_register_user_handlers
-from handlers.admin_handlers import lastperson07_register_admin_handlers
-from handlers.error_handler import lastperson07_register_error_handler
+# Import configuration and modules only if telegram is available
+if PTB_AVAILABLE:
+    from config.config import (
+        LASTPERSON07_TELEGRAM_TOKEN, LASTPERSON07_LOG_FORMAT,
+        LASTPERSON07_LOG_FILE, LASTPERSON07_MESSAGES,
+        LASTPERSON07_RATE_LIMIT_SECONDS
+    )
+    from db.client import lastperson07_db_client
+    from db.queries import lastperson07_queries
+    from utils.scheduler import lastperson07_init_scheduler
+    from utils.broadcaster import lastperson07_init_broadcaster
+    from handlers.user_handlers import lastperson07_register_user_handlers
+    from handlers.admin_handlers import lastperson07_register_admin_handlers
+    from handlers.error_handler import lastperson07_register_error_handler
+else:
+    logging.error("Cannot proceed without telegram library")
+    sys.exit(1)
 
 # Setup logging
-logging.basicConfig(
-    format=LASTPERSON07_LOG_FORMAT,
-    level=logging.INFO,
-    handlers=[
-        logging.FileHandler(LASTPERSON07_LOG_FILE),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
+def setup_logging():
+    """Setup logging configuration."""
+    # Ensure logs directory exists
+    os.makedirs("logs", exist_ok=True)
+    
+    logging.basicConfig(
+        format=LASTPERSON07_LOG_FORMAT,
+        level=logging.INFO,
+        handlers=[
+            logging.FileHandler(LASTPERSON07_LOG_FILE),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
 
+setup_logging()
 logger = logging.getLogger(__name__)
 
 class LastPerson07Bot:
@@ -48,14 +70,28 @@ class LastPerson07Bot:
     async def lastperson07_initialize(self):
         """Initialize bot components."""
         try:
+            # Check required environment variables
+            if not LASTPERSON07_TELEGRAM_TOKEN:
+                logger.error("TELEGRAM_TOKEN not set in environment variables")
+                raise ValueError("TELEGRAM_TOKEN is required")
+            
             # Log versions
             logger.info(f"Python version: {sys.version}")
             logger.info(f"python-telegram-bot version: {ptb_version}")
             
-            # Connect to database
-            logger.info("Connecting to database...")
-            await lastperson07_db_client.connect()
-            await lastperson07_db_client.create_indexes()
+            # Connect to database with retries
+            max_retries = 5
+            for i in range(max_retries):
+                try:
+                    logger.info(f"Connecting to database (attempt {i+1}/{max_retries})...")
+                    await lastperson07_db_client.connect()
+                    await lastperson07_db_client.create_indexes()
+                    break
+                except Exception as e:
+                    if i == max_retries - 1:
+                        raise
+                    logger.warning(f"Database connection failed (attempt {i+1}): {str(e)}")
+                    await asyncio.sleep(2 ** i)  # Exponential backoff
             
             # Create application
             logger.info("Creating Telegram application...")
@@ -76,9 +112,12 @@ class LastPerson07Bot:
             await lastperson07_init_scheduler(self.application)
             
             # Check maintenance mode
-            settings = await lastperson07_queries.get_bot_settings()
-            if settings.maintenance:
-                logger.warning("Bot is in maintenance mode")
+            try:
+                settings = await lastperson07_queries.get_bot_settings()
+                if settings.maintenance:
+                    logger.warning("Bot is in maintenance mode")
+            except Exception as e:
+                logger.warning(f"Could not check maintenance mode: {str(e)}")
             
             logger.info("✅ Bot initialized successfully")
             
@@ -111,9 +150,12 @@ class LastPerson07Bot:
                 logger.info("Stopping bot...")
                 
                 # Stop scheduler
-                from utils.scheduler import lastperson07_scheduler
-                if lastperson07_scheduler:
-                    await lastperson07_scheduler.stop()
+                try:
+                    from utils.scheduler import lastperson07_scheduler
+                    if lastperson07_scheduler:
+                        await lastperson07_scheduler.stop()
+                except Exception as e:
+                    logger.warning(f"Error stopping scheduler: {str(e)}")
                 
                 # Stop application
                 await self.application.updater.stop()
@@ -121,7 +163,10 @@ class LastPerson07Bot:
                 await self.application.shutdown()
                 
                 # Close database connection
-                await lastperson07_db_client.disconnect()
+                try:
+                    await lastperson07_db_client.disconnect()
+                except Exception as e:
+                    logger.warning(f"Error closing database: {str(e)}")
                 
                 self.running = False
                 logger.info("✅ Bot stopped successfully")
