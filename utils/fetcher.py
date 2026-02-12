@@ -8,11 +8,10 @@ import os
 import logging
 import asyncio
 import aiohttp
-import cv2
-import numpy as np
-import tempfile
 from typing import Optional, Tuple, Dict, Any
 from datetime import datetime
+import tempfile
+from urllib.parse import quote
 
 from config.config import (
     LASTPERSON07_API_ENDPOINTS, LASTPERSON07_MIN_IMAGE_WIDTH,
@@ -35,6 +34,20 @@ class LastPerson07WallpaperFetcher:
             "pexels": LASTPERSON07_PEXELS_KEY,
             "pixabay": LASTPERSON07_PIXABAY_KEY
         }
+        self.opencv_available = self._check_opencv()
+    
+    def _check_opencv(self) -> bool:
+        """Check if OpenCV is available and working."""
+        try:
+            import cv2
+            # Test basic OpenCV functionality
+            import numpy as np
+            test_img = np.zeros((100, 100, 3), dtype=np.uint8)
+            _ = cv2.imread("")  # This will fail but we catch it
+            return True
+        except Exception as e:
+            logger.warning(f"OpenCV not available: {str(e)}. Image validation will be skipped.")
+            return False
     
     async def fetch_wallpaper(self, category: str = LASTPERSON07_DEFAULT_CATEGORY) -> Optional[LastPerson07WallpaperData]:
         """Fetch wallpaper using API fallback chain."""
@@ -47,8 +60,8 @@ class LastPerson07WallpaperFetcher:
                 wallpaper_data = await self.lastperson07_fetch_from_api(api_source, sanitized_category)
                 
                 if wallpaper_data:
-                    # Download and validate image
-                    if await self.lastperson07_download_and_validate_image(wallpaper_data.image_url):
+                    # Download and validate image (skip if OpenCV not available)
+                    if not self.opencv_available or await self.lastperson07_download_and_validate_image(wallpaper_data.image_url):
                         logger.info(f"Successfully fetched wallpaper from {api_source}")
                         return wallpaper_data
                     else:
@@ -223,9 +236,18 @@ class LastPerson07WallpaperFetcher:
     
     async def lastperson07_download_and_validate_image(self, image_url: str) -> bool:
         """Download image and validate resolution."""
+        # Skip OpenCV validation if not available
+        if not self.opencv_available:
+            logger.info("Skipping image validation (OpenCV not available)")
+            return True
+        
         temp_file = None
         
         try:
+            # Import OpenCV only when needed
+            import cv2
+            import numpy as np
+            
             # Create temporary file
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=".jpg")
             temp_path = temp_file.name
