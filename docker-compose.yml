@@ -1,0 +1,35 @@
+version: '3.8'
+
+services:
+  mongodb:
+    image: mongo:7.0
+    container_name: lastperson07_mongo
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_DATABASE: lastperson07
+    volumes:
+      - mongodb_data:/data/db
+    ports:
+      - "27017:27017"
+    networks:
+      - lastperson07_network
+
+  bot:
+    build: .
+    container_name: lastperson07_bot
+    restart: unless-stopped
+    depends_on:
+      - mongodb
+    env_file:
+      - .env
+    volumes:
+      - ./logs:/app/logs
+    networks:
+      - lastperson07_network
+
+volumes:
+  mongodb_data:
+
+networks:
+  lastperson07_network:
+    driver: bridge
